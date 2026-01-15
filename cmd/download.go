@@ -310,9 +310,7 @@ func handleDownloadCommand(url string) error {
 	dlConfig = *config
 
 	// Instantiate the client
-	client := core.NewClient(
-		dlConfig.Feishu.AppId, dlConfig.Feishu.AppSecret,
-	)
+	client := core.NewClient(dlConfig.Feishu)
 	ctx := context.Background()
 
 	// 初始化缓存管理器

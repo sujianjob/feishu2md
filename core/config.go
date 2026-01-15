@@ -2,9 +2,16 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
+)
+
+// 鉴权类型常量
+const (
+	AuthTypeApp  = "app"
+	AuthTypeUser = "user"
 )
 
 type Config struct {
@@ -15,6 +22,13 @@ type Config struct {
 type FeishuConfig struct {
 	AppId     string `json:"app_id"`
 	AppSecret string `json:"app_secret"`
+
+	// 用户鉴权相关字段
+	UserAccessToken string `json:"user_access_token,omitempty"`
+
+	// 鉴权类型选择: "app" 或 "user"
+	// 默认为 "app",保持向后兼容
+	AuthType string `json:"auth_type,omitempty"`
 }
 
 type OutputConfig struct {
@@ -29,6 +43,7 @@ func NewConfig(appId, appSecret string) *Config {
 		Feishu: FeishuConfig{
 			AppId:     appId,
 			AppSecret: appSecret,
+			AuthType:  AuthTypeApp, // 默认应用鉴权
 		},
 		Output: OutputConfig{
 			ImageDir:        "static",
@@ -37,6 +52,32 @@ func NewConfig(appId, appSecret string) *Config {
 			SkipImgDownload: false,
 		},
 	}
+}
+
+// Validate 验证配置的有效性
+func (fc *FeishuConfig) Validate() error {
+	// 设置默认值
+	if fc.AuthType == "" {
+		fc.AuthType = AuthTypeApp
+	}
+
+	// 验证 AuthType 的有效性
+	if fc.AuthType != AuthTypeApp && fc.AuthType != AuthTypeUser {
+		return fmt.Errorf("invalid auth_type: %s, must be 'app' or 'user'", fc.AuthType)
+	}
+
+	// 验证必需字段
+	if fc.AuthType == AuthTypeApp {
+		if fc.AppId == "" || fc.AppSecret == "" {
+			return fmt.Errorf("app_id and app_secret are required for app authentication")
+		}
+	} else if fc.AuthType == AuthTypeUser {
+		if fc.UserAccessToken == "" {
+			return fmt.Errorf("user_access_token is required for user authentication")
+		}
+	}
+
+	return nil
 }
 
 func GetConfigFilePath() (string, error) {
@@ -58,6 +99,12 @@ func ReadConfigFromFile(configPath string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// 验证配置
+	if err = config.Feishu.Validate(); err != nil {
+		return nil, err
+	}
+
 	return config, nil
 }
 

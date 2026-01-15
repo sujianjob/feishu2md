@@ -29,6 +29,100 @@
   - [获取知识空间节点信息](https://open.feishu.cn/document/server-docs/docs/wiki-v2/space-node/get_node)，「查看知识库」权限 `wiki:wiki:readonly`
 - 打开凭证与基础信息，获取 App ID 和 App Secret
 
+## 鉴权方式
+
+feishu2md 支持两种鉴权方式：**应用鉴权**和**用户鉴权**。
+
+### 应用鉴权（默认）
+
+使用飞书应用的 App ID 和 App Secret 进行鉴权。
+
+**适用场景**：
+- 批量下载多个文档
+- 长期使用的自动化任务
+- 访问应用有权限的文档
+
+**配置方法**：
+```bash
+feishu2md config --appId "cli_xxxxx" --appSecret "xxxxx" --authType "app"
+```
+
+**配置文件示例**：
+```json
+{
+  "feishu": {
+    "app_id": "cli_xxxxx",
+    "app_secret": "xxxxx",
+    "auth_type": "app"
+  },
+  "output": {
+    "image_dir": "static",
+    "title_as_filename": false,
+    "use_html_tags": false,
+    "skip_img_download": false
+  }
+}
+```
+
+### 用户鉴权
+
+使用个人用户访问令牌（User Access Token）进行鉴权。
+
+**适用场景**：
+- 访问个人私有文档
+- 机器人权限不足时的替代方案
+- 临时下载任务
+
+**配置方法**：
+```bash
+# 设置用户访问令牌和鉴权类型
+feishu2md config --userAccessToken "u-xxxxx" --authType "user"
+
+# 或使用简写
+feishu2md config --uat "u-xxxxx" --authType "user"
+```
+
+**配置文件示例**：
+```json
+{
+  "feishu": {
+    "user_access_token": "u-xxxxx",
+    "auth_type": "user"
+  },
+  "output": {
+    "image_dir": "static",
+    "title_as_filename": false,
+    "use_html_tags": false,
+    "skip_img_download": false
+  }
+}
+```
+
+**获取用户访问令牌**：
+
+用户访问令牌需要通过飞书开放平台的 OAuth 2.0 授权流程获取。详细步骤请参考：
+- [飞书开放平台 - 获取 user_access_token](https://open.feishu.cn/document/server-docs/api-call-guide/calling-process/get-access-token)
+
+**注意事项**：
+- 用户访问令牌有效期较短（通常为 2 小时），过期后需要重新获取
+- 令牌过期时，使用 `feishu2md config --uat "new-token"` 更新配置
+- 不要将包含令牌的配置文件提交到版本控制系统
+
+### 切换鉴权方式
+
+配置文件可以同时保存两种鉴权方式的凭证，通过 `auth_type` 字段灵活切换：
+
+```bash
+# 切换到用户鉴权
+feishu2md config --authType "user"
+
+# 切换回应用鉴权
+feishu2md config --authType "app"
+
+# 查看当前配置
+feishu2md config
+```
+
 ## 如何使用
 
 注意：飞书旧版文档的下载工具已决定不再维护，但分支 [v1_support](https://github.com/Wsine/feishu2md/tree/v1_support) 仍可使用，对应的归档为 [v1.4.0](https://github.com/Wsine/feishu2md/releases/tag/v1.4.0)，请知悉。

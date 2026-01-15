@@ -27,14 +27,27 @@ func main() {
 					&cli.StringFlag{
 						Name:        "appId",
 						Value:       "",
-						Usage:       "Set app id for the OPEN API",
+						Usage:       "Set app id for the OPEN API (app auth)",
 						Destination: &configOpts.appId,
 					},
 					&cli.StringFlag{
 						Name:        "appSecret",
 						Value:       "",
-						Usage:       "Set app secret for the OPEN API",
+						Usage:       "Set app secret for the OPEN API (app auth)",
 						Destination: &configOpts.appSecret,
+					},
+					&cli.StringFlag{
+						Name:        "userAccessToken",
+						Aliases:     []string{"uat"},
+						Value:       "",
+						Usage:       "Set user access token for the OPEN API (user auth)",
+						Destination: &configOpts.userAccessToken,
+					},
+					&cli.StringFlag{
+						Name:        "authType",
+						Value:       "",
+						Usage:       "Set authentication type: 'app' or 'user'",
+						Destination: &configOpts.authType,
 					},
 				},
 				Action: func(ctx *cli.Context) error {

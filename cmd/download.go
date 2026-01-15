@@ -16,16 +16,18 @@ import (
 )
 
 type DownloadOpts struct {
-	outputDir string
-	dump      bool
-	batch     bool
-	wiki      bool
+	outputDir   string
+	dump        bool
+	batch       bool
+	wiki        bool
+	incremental bool // 启用增量下载
+	force       bool // 强制重新下载
 }
 
 var dlOpts = DownloadOpts{}
 var dlConfig core.Config
 
-func downloadDocument(ctx context.Context, client *core.Client, url string, opts *DownloadOpts) error {
+func downloadDocument(ctx context.Context, client *core.Client, url string, opts *DownloadOpts, cacheManager *core.CacheManager) error {
 	// Validate the url to download
 	docType, docToken, err := utils.ValidateDocumentURL(url)
 	if err != nil {
@@ -53,9 +55,43 @@ func downloadDocument(ctx context.Context, client *core.Client, url string, opts
 	docx, blocks, err := client.GetDocxContent(ctx, docToken)
 	utils.CheckErr(err)
 
+	title := docx.Title
+	revisionID := docx.RevisionID
+
+	// 确定输出文件名
+	var mdName string
+	if dlConfig.Output.TitleAsFilename {
+		mdName = fmt.Sprintf("%s.md", utils.SanitizeFileName(title))
+	} else {
+		mdName = fmt.Sprintf("%s.md", docToken)
+	}
+	outputPath := filepath.Join(opts.outputDir, mdName)
+
+	// 增量下载逻辑：检查是否需要下载
+	if opts.incremental && !opts.force && cacheManager != nil {
+		shouldDownload, skipReason := cacheManager.ShouldDownload(
+			docToken,
+			revisionID,
+			outputPath,
+		)
+
+		if !shouldDownload {
+			fmt.Printf("⊘ 跳过: %s - %s\n", title, skipReason)
+			// 即使跳过下载，也要更新缓存（用于建立缓存映射）
+			cacheManager.UpdateDocument(
+				docToken,
+				revisionID,
+				title,
+				mdName,
+				docType,
+			)
+			return nil
+		}
+	}
+
+	// 继续执行下载流程
 	parser := core.NewParser(dlConfig.Output)
 
-	title := docx.Title
 	markdown := parser.ParseDocxContent(docx, blocks)
 
 	if !dlConfig.Output.SkipImgDownload {
@@ -85,7 +121,7 @@ func downloadDocument(ctx context.Context, client *core.Client, url string, opts
 
 	if dlOpts.dump {
 		jsonName := fmt.Sprintf("%s.json", docToken)
-		outputPath := filepath.Join(opts.outputDir, jsonName)
+		jsonOutputPath := filepath.Join(opts.outputDir, jsonName)
 		data := struct {
 			Document *lark.DocxDocument `json:"document"`
 			Blocks   []*lark.DocxBlock  `json:"blocks"`
@@ -95,27 +131,33 @@ func downloadDocument(ctx context.Context, client *core.Client, url string, opts
 		}
 		pdata := utils.PrettyPrint(data)
 
-		if err = os.WriteFile(outputPath, []byte(pdata), 0o644); err != nil {
+		if err = os.WriteFile(jsonOutputPath, []byte(pdata), 0o644); err != nil {
 			return err
 		}
-		fmt.Printf("Dumped json response to %s\n", outputPath)
+		fmt.Printf("Dumped json response to %s\n", jsonOutputPath)
 	}
 
 	// Write to markdown file
-	mdName := fmt.Sprintf("%s.md", docToken)
-	if dlConfig.Output.TitleAsFilename {
-		mdName = fmt.Sprintf("%s.md", utils.SanitizeFileName(title))
-	}
-	outputPath := filepath.Join(opts.outputDir, mdName)
 	if err = os.WriteFile(outputPath, []byte(result), 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("Downloaded markdown file to %s\n", outputPath)
+	fmt.Printf("✓ Downloaded markdown file to %s\n", outputPath)
+
+	// 更新缓存
+	if cacheManager != nil && (opts.incremental || opts.force) {
+		cacheManager.UpdateDocument(
+			docToken,
+			revisionID,
+			title,
+			mdName,
+			docType,
+		)
+	}
 
 	return nil
 }
 
-func downloadDocuments(ctx context.Context, client *core.Client, url string) error {
+func downloadDocuments(ctx context.Context, client *core.Client, url string, cacheManager *core.CacheManager) error {
 	// Validate the url to download
 	folderToken, err := utils.ValidateFolderURL(url)
 	if err != nil {
@@ -134,7 +176,13 @@ func downloadDocuments(ctx context.Context, client *core.Client, url string) err
 		if err != nil {
 			return err
 		}
-		opts := DownloadOpts{outputDir: folderPath, dump: dlOpts.dump, batch: false}
+		opts := DownloadOpts{
+			outputDir:   folderPath,
+			dump:        dlOpts.dump,
+			batch:       false,
+			incremental: dlOpts.incremental,
+			force:       dlOpts.force,
+		}
 		for _, file := range files {
 			if file.Type == "folder" {
 				_folderPath := filepath.Join(folderPath, file.Name)
@@ -145,7 +193,7 @@ func downloadDocuments(ctx context.Context, client *core.Client, url string) err
 				// concurrently download the document
 				wg.Add(1)
 				go func(_url string) {
-					if err := downloadDocument(ctx, client, _url, &opts); err != nil {
+					if err := downloadDocument(ctx, client, _url, &opts, cacheManager); err != nil {
 						errChan <- err
 					}
 					wg.Done()
@@ -169,7 +217,7 @@ func downloadDocuments(ctx context.Context, client *core.Client, url string) err
 	return nil
 }
 
-func downloadWiki(ctx context.Context, client *core.Client, url string) error {
+func downloadWiki(ctx context.Context, client *core.Client, url string, cacheManager *core.CacheManager) error {
 	prefixURL, spaceID, err := utils.ValidateWikiURL(url)
 	if err != nil {
 		return err
@@ -213,17 +261,22 @@ func downloadWiki(ctx context.Context, client *core.Client, url string) error {
 				}
 			}
 			if n.ObjType == "docx" {
-				opts := DownloadOpts{outputDir: folderPath, dump: dlOpts.dump, batch: false}
+				opts := DownloadOpts{
+					outputDir:   folderPath,
+					dump:        dlOpts.dump,
+					batch:       false,
+					incremental: dlOpts.incremental,
+					force:       dlOpts.force,
+				}
 				wg.Add(1)
 				semaphore <- struct{}{}
 				go func(_url string) {
-					if err := downloadDocument(ctx, client, _url, &opts); err != nil {
+					if err := downloadDocument(ctx, client, _url, &opts, cacheManager); err != nil {
 						errChan <- err
 					}
 					wg.Done()
 					<-semaphore
 				}(prefixURL + "/wiki/" + n.NodeToken)
-				// downloadDocument(ctx, client, prefixURL+"/wiki/"+n.NodeToken, &opts)
 			}
 		}
 		return nil
@@ -262,13 +315,40 @@ func handleDownloadCommand(url string) error {
 	)
 	ctx := context.Background()
 
+	// 初始化缓存管理器
+	var cacheManager *core.CacheManager
+	if dlOpts.incremental || dlOpts.force {
+		cacheManager, err = core.NewCacheManager(dlOpts.outputDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "警告: 无法初始化缓存管理器: %v\n", err)
+			cacheManager = nil
+		}
+
+		if dlOpts.force && cacheManager != nil {
+			fmt.Println("强制模式: 将重新下载所有文档并更新缓存")
+		} else if dlOpts.incremental && cacheManager != nil {
+			fmt.Println("增量模式: 将跳过未修改的文档")
+		}
+	}
+
+	// 执行下载
+	var downloadErr error
 	if dlOpts.batch {
-		return downloadDocuments(ctx, client, url)
+		downloadErr = downloadDocuments(ctx, client, url, cacheManager)
+	} else if dlOpts.wiki {
+		downloadErr = downloadWiki(ctx, client, url, cacheManager)
+	} else {
+		downloadErr = downloadDocument(ctx, client, url, &dlOpts, cacheManager)
 	}
 
-	if dlOpts.wiki {
-		return downloadWiki(ctx, client, url)
+	// 保存缓存
+	if cacheManager != nil {
+		if err := cacheManager.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "警告: 缓存保存失败: %v\n", err)
+		} else if dlOpts.incremental || dlOpts.force {
+			fmt.Println("✓ 缓存已更新")
+		}
 	}
 
-	return downloadDocument(ctx, client, url, &dlOpts)
+	return downloadErr
 }

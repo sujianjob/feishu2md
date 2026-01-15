@@ -71,12 +71,30 @@ func main() {
 						Usage:       "Download all documents within the wiki.",
 						Destination: &dlOpts.wiki,
 					},
+					&cli.BoolFlag{
+						Name:        "incremental",
+						Aliases:     []string{"i"},
+						Value:       false,
+						Usage:       "Enable incremental download (skip unchanged documents)",
+						Destination: &dlOpts.incremental,
+					},
+					&cli.BoolFlag{
+						Name:        "force",
+						Aliases:     []string{"f"},
+						Value:       false,
+						Usage:       "Force re-download all documents (ignore cache)",
+						Destination: &dlOpts.force,
+					},
 				},
 				ArgsUsage: "<url>",
 				Action: func(ctx *cli.Context) error {
 					if ctx.NArg() == 0 {
 						return cli.Exit("Please specify the document/folder/wiki url", 1)
 					} else {
+						// 参数验证：force 和 incremental 互斥
+						if dlOpts.force && dlOpts.incremental {
+							return cli.Exit("Cannot use --force and --incremental together", 1)
+						}
 						url := ctx.Args().First()
 						return handleDownloadCommand(url)
 					}

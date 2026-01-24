@@ -98,6 +98,18 @@ func main() {
 						Usage:       "Force re-download all documents (ignore cache)",
 						Destination: &dlOpts.force,
 					},
+					&cli.StringFlag{
+						Name:        "include",
+						Value:       "",
+						Usage:       "Only download directories matching patterns (comma-separated, supports wildcards like *test*)",
+						Destination: &dlOpts.include,
+					},
+					&cli.StringFlag{
+						Name:        "exclude",
+						Value:       "",
+						Usage:       "Exclude directories matching patterns (comma-separated, supports wildcards like *draft*)",
+						Destination: &dlOpts.exclude,
+					},
 				},
 				ArgsUsage: "<url>",
 				Action: func(ctx *cli.Context) error {

@@ -20,8 +20,10 @@ type DownloadOpts struct {
 	dump        bool
 	batch       bool
 	wiki        bool
-	incremental bool // 启用增量下载
-	force       bool // 强制重新下载
+	incremental bool   // 启用增量下载
+	force       bool   // 强制重新下载
+	include     string // 仅下载匹配的目录（白名单，逗号分隔）
+	exclude     string // 排除匹配的目录（黑名单，逗号分隔）
 }
 
 var dlOpts = DownloadOpts{}
@@ -157,7 +159,7 @@ func downloadDocument(ctx context.Context, client *core.Client, url string, opts
 	return nil
 }
 
-func downloadDocuments(ctx context.Context, client *core.Client, url string, cacheManager *core.CacheManager) error {
+func downloadDocuments(ctx context.Context, client *core.Client, url string, cacheManager *core.CacheManager, filter *core.NodeFilter) error {
 	// Validate the url to download
 	folderToken, err := utils.ValidateFolderURL(url)
 	if err != nil {
@@ -185,11 +187,20 @@ func downloadDocuments(ctx context.Context, client *core.Client, url string, cac
 		}
 		for _, file := range files {
 			if file.Type == "folder" {
+				// 检查文件夹是否应该被下载
+				if filter != nil && !filter.ShouldDownloadFolder(folderPath, file.Name) {
+					fmt.Printf("⊘ 跳过文件夹: %s\n", file.Name)
+					continue
+				}
 				_folderPath := filepath.Join(folderPath, file.Name)
 				if err := processFolder(ctx, _folderPath, file.Token); err != nil {
 					return err
 				}
 			} else if file.Type == "docx" {
+				// 检查文档的父目录是否被排除
+				if filter != nil && !filter.ShouldDownloadDocument(folderPath) {
+					continue
+				}
 				// concurrently download the document
 				wg.Add(1)
 				go func(_url string) {
@@ -217,7 +228,7 @@ func downloadDocuments(ctx context.Context, client *core.Client, url string, cac
 	return nil
 }
 
-func downloadWiki(ctx context.Context, client *core.Client, url string, cacheManager *core.CacheManager) error {
+func downloadWiki(ctx context.Context, client *core.Client, url string, cacheManager *core.CacheManager, filter *core.NodeFilter) error {
 	prefixURL, spaceID, err := utils.ValidateWikiURL(url)
 	if err != nil {
 		return err
@@ -254,6 +265,18 @@ func downloadWiki(ctx context.Context, client *core.Client, url string, cacheMan
 		}
 		for _, n := range nodes {
 			if n.HasChild {
+				// 检查目录是否应该被下载
+				if filter != nil {
+					include, skippedByParent := filter.ShouldIncludeNode(folderPath, n.Title)
+					if !include {
+						if skippedByParent {
+							fmt.Printf("⊘ 跳过目录（父目录已排除）: %s\n", n.Title)
+						} else {
+							fmt.Printf("⊘ 跳过目录: %s\n", n.Title)
+						}
+						continue
+					}
+				}
 				_folderPath := filepath.Join(folderPath, n.Title)
 				if err := downloadWikiNode(ctx, client,
 					spaceID, _folderPath, &n.NodeToken); err != nil {
@@ -261,6 +284,10 @@ func downloadWiki(ctx context.Context, client *core.Client, url string, cacheMan
 				}
 			}
 			if n.ObjType == "docx" {
+				// 检查文档的父目录是否被排除
+				if filter != nil && !filter.ShouldDownloadDocument(folderPath) {
+					continue
+				}
 				opts := DownloadOpts{
 					outputDir:   folderPath,
 					dump:        dlOpts.dump,
@@ -329,12 +356,30 @@ func handleDownloadCommand(url string) error {
 		}
 	}
 
+	// 初始化目录过滤器
+	var nodeFilter *core.NodeFilter
+	if dlOpts.include != "" || dlOpts.exclude != "" {
+		filterConfig := core.FilterConfig{
+			IncludePatterns: core.ParsePatterns(dlOpts.include),
+			ExcludePatterns: core.ParsePatterns(dlOpts.exclude),
+		}
+		nodeFilter = core.NewNodeFilter(filterConfig)
+
+		fmt.Println("目录过滤已启用:")
+		if len(filterConfig.IncludePatterns) > 0 {
+			fmt.Printf("  包含: %v\n", filterConfig.IncludePatterns)
+		}
+		if len(filterConfig.ExcludePatterns) > 0 {
+			fmt.Printf("  排除: %v\n", filterConfig.ExcludePatterns)
+		}
+	}
+
 	// 执行下载
 	var downloadErr error
 	if dlOpts.batch {
-		downloadErr = downloadDocuments(ctx, client, url, cacheManager)
+		downloadErr = downloadDocuments(ctx, client, url, cacheManager, nodeFilter)
 	} else if dlOpts.wiki {
-		downloadErr = downloadWiki(ctx, client, url, cacheManager)
+		downloadErr = downloadWiki(ctx, client, url, cacheManager, nodeFilter)
 	} else {
 		downloadErr = downloadDocument(ctx, client, url, &dlOpts, cacheManager)
 	}

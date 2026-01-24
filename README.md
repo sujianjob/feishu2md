@@ -169,15 +169,19 @@ feishu2md config
    $ feishu2md dl -h
    NAME:
      feishu2md download - Download feishu/larksuite document to markdown file
- 
+
    USAGE:
      feishu2md download [command options] <url>
- 
+
    OPTIONS:
      --output value, -o value  Specify the output directory for the markdown files (default: "./")
      --dump                    Dump json response of the OPEN API (default: false)
      --batch                   Download all documents under a folder (default: false)
      --wiki                    Download all documents within the wiki. (default: false)
+     --incremental, -i         Enable incremental download (skip unchanged documents) (default: false)
+     --force, -f               Force re-download all documents (ignore cache) (default: false)
+     --include value           Only download directories matching patterns (comma-separated, supports wildcards)
+     --exclude value           Exclude directories matching patterns (comma-separated, supports wildcards)
      --help, -h                show help (default: false)
 
    ```
@@ -222,6 +226,41 @@ feishu2md config
   $ feishu2md dl --wiki -o output_directory "https://domain.feishu.cn/wiki/settings/123456789101112"
   ```
 
+  **增量下载**
+
+  支持增量下载，跳过未修改的文档，节省时间和 API 调用：
+
+  ```bash
+  # 增量下载（跳过未修改的文档）
+  $ feishu2md dl --wiki -i "https://domain.feishu.cn/wiki/settings/123456789101112"
+
+  # 强制重新下载所有文档
+  $ feishu2md dl --wiki -f "https://domain.feishu.cn/wiki/settings/123456789101112"
+  ```
+
+  **目录过滤**
+
+  支持通过 `--include` 和 `--exclude` 参数过滤目录：
+
+  ```bash
+  # 仅下载包含"文档"的目录
+  $ feishu2md dl --wiki --include "*文档*" "https://domain.feishu.cn/wiki/settings/xxx"
+
+  # 排除草稿和测试目录
+  $ feishu2md dl --wiki --exclude "*草稿*,*测试*" "https://domain.feishu.cn/wiki/settings/xxx"
+
+  # 组合使用：仅下载技术相关目录，但排除草稿
+  $ feishu2md dl --wiki --include "技术*,API*" --exclude "*草稿*" "https://domain.feishu.cn/wiki/settings/xxx"
+
+  # 批量下载文件夹时也支持过滤
+  $ feishu2md dl --batch --exclude "archived,temp" "https://domain.feishu.cn/drive/folder/xxx"
+  ```
+
+  通配符语法：
+  - `*` 匹配任意字符
+  - `?` 匹配单个字符
+  - `[abc]` 匹配指定字符
+
 </details>
 
 <details>
@@ -256,3 +295,91 @@ feishu2md config
 
 - [chyroc/lark](https://github.com/chyroc/lark)
 - [chyroc/lark_docs_md](https://github.com/chyroc/lark_docs_md)
+
+## 开发指南
+
+### 环境要求
+
+- Go 1.21+
+
+### 构建
+
+```bash
+# 构建 CLI
+make build
+
+# 构建 Web 服务
+make server
+
+# 构建全部
+make all
+```
+
+### 测试
+
+```bash
+# 运行所有测试
+make test
+
+# 代码格式化
+make format
+```
+
+注意：部分测试需要有效的飞书凭证（环境变量 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET`）。
+
+### 跨平台编译
+
+```bash
+# 编译所有平台
+make cross-build
+
+# 仅编译 Linux
+make cross-build-linux
+
+# 仅编译 Windows
+make cross-build-windows
+
+# 仅编译 macOS
+make cross-build-darwin
+```
+
+支持的平台：
+| 平台 | 架构 |
+|------|------|
+| Linux | amd64, arm64 |
+| Windows | amd64 |
+| macOS | amd64, arm64 |
+
+### Docker
+
+```bash
+# 构建镜像
+make image
+
+# 运行容器
+make docker
+```
+
+### 项目结构
+
+```
+feishu2md/
+├── cmd/           # CLI 入口和命令
+├── core/          # 核心业务逻辑
+│   ├── client.go  # 飞书 API 客户端
+│   ├── parser.go  # 文档解析器
+│   ├── filter.go  # 目录过滤器
+│   └── cache.go   # 缓存管理
+├── utils/         # 工具函数
+├── web/           # Web 服务
+└── testdata/      # 测试数据
+```
+
+### 贡献
+
+欢迎提交 PR！请确保：
+
+1. 代码通过 `make format` 格式化
+2. 所有测试通过 `make test`
+3. 新功能包含相应的测试用例
+

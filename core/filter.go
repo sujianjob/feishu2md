@@ -15,6 +15,7 @@ type FilterConfig struct {
 type NodeFilter struct {
 	config        FilterConfig
 	excludedPaths map[string]bool // 已排除的路径缓存（用于跟踪父目录）
+	includedPaths map[string]bool // 已包含的路径缓存（用于 Include 白名单检查）
 }
 
 // NewNodeFilter 创建节点过滤器
@@ -22,6 +23,7 @@ func NewNodeFilter(config FilterConfig) *NodeFilter {
 	return &NodeFilter{
 		config:        config,
 		excludedPaths: make(map[string]bool),
+		includedPaths: make(map[string]bool),
 	}
 }
 
@@ -98,6 +100,8 @@ func (f *NodeFilter) ShouldIncludeNode(parentPath, nodeName string) (include boo
 		}
 	}
 
+	// 记录已包含的路径
+	f.includedPaths[currentPath] = true
 	return true, false
 }
 
@@ -125,6 +129,27 @@ func (f *NodeFilter) isParentExcluded(path string) bool {
 	return false
 }
 
+// isParentIncluded 检查路径或其祖先路径是否被包含
+func (f *NodeFilter) isParentIncluded(path string) bool {
+	if path == "" || path == "." {
+		return false
+	}
+
+	path = filepath.Clean(path)
+	current := path
+	for current != "" && current != "." {
+		if f.includedPaths[current] {
+			return true
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		current = parent
+	}
+	return false
+}
+
 // ShouldDownloadFolder 判断文件夹是否应该下载（用于 batch 模式）
 func (f *NodeFilter) ShouldDownloadFolder(parentPath, folderName string) bool {
 	include, _ := f.ShouldIncludeNode(parentPath, folderName)
@@ -133,9 +158,21 @@ func (f *NodeFilter) ShouldDownloadFolder(parentPath, folderName string) bool {
 
 // ShouldDownloadDocument 判断文档是否应该下载
 // 文档本身不受过滤影响，只有其父目录被排除时才跳过
+// 当配置了 Include 白名单时，只有父目录在已包含路径中的文档才会被下载
 func (f *NodeFilter) ShouldDownloadDocument(parentPath string) bool {
 	parentPath = filepath.Clean(parentPath)
-	return !f.isParentExcluded(parentPath) && !f.excludedPaths[parentPath]
+
+	// 检查父目录是否被排除
+	if f.isParentExcluded(parentPath) || f.excludedPaths[parentPath] {
+		return false
+	}
+
+	// 如果配置了 Include 白名单，检查父目录是否在已包含的路径中
+	if len(f.config.IncludePatterns) > 0 {
+		return f.isParentIncluded(parentPath)
+	}
+
+	return true
 }
 
 // HasFilters 检查是否配置了过滤条件
@@ -146,4 +183,5 @@ func (f *NodeFilter) HasFilters() bool {
 // Reset 重置过滤器状态（用于新的下载任务）
 func (f *NodeFilter) Reset() {
 	f.excludedPaths = make(map[string]bool)
+	f.includedPaths = make(map[string]bool)
 }

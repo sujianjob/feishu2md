@@ -16,20 +16,16 @@ import (
 )
 
 type DownloadOpts struct {
-	outputDir   string
-	dump        bool
-	batch       bool
-	wiki        bool
-	incremental bool   // 启用增量下载
-	force       bool   // 强制重新下载
-	include     string // 仅下载匹配的目录（白名单，逗号分隔）
-	exclude     string // 排除匹配的目录（黑名单，逗号分隔）
+	outputDir string
+	dump      bool
+	batch     bool
+	wiki      bool
 }
 
 var dlOpts = DownloadOpts{}
 var dlConfig core.Config
 
-func downloadDocument(ctx context.Context, client *core.Client, url string, opts *DownloadOpts, cacheManager *core.CacheManager) error {
+func downloadDocument(ctx context.Context, client *core.Client, url string, opts *DownloadOpts) error {
 	// Validate the url to download
 	docType, docToken, err := utils.ValidateDocumentURL(url)
 	if err != nil {
@@ -58,7 +54,6 @@ func downloadDocument(ctx context.Context, client *core.Client, url string, opts
 	utils.CheckErr(err)
 
 	title := docx.Title
-	revisionID := docx.RevisionID
 
 	// 确定输出文件名
 	var mdName string
@@ -68,28 +63,6 @@ func downloadDocument(ctx context.Context, client *core.Client, url string, opts
 		mdName = fmt.Sprintf("%s.md", docToken)
 	}
 	outputPath := filepath.Join(opts.outputDir, mdName)
-
-	// 增量下载逻辑：检查是否需要下载
-	if opts.incremental && !opts.force && cacheManager != nil {
-		shouldDownload, skipReason := cacheManager.ShouldDownload(
-			docToken,
-			revisionID,
-			outputPath,
-		)
-
-		if !shouldDownload {
-			fmt.Printf("⊘ 跳过: %s - %s\n", title, skipReason)
-			// 即使跳过下载，也要更新缓存（用于建立缓存映射）
-			cacheManager.UpdateDocument(
-				docToken,
-				revisionID,
-				title,
-				mdName,
-				docType,
-			)
-			return nil
-		}
-	}
 
 	// 继续执行下载流程
 	parser := core.NewParser(dlConfig.Output)
@@ -145,21 +118,10 @@ func downloadDocument(ctx context.Context, client *core.Client, url string, opts
 	}
 	fmt.Printf("✓ Downloaded markdown file to %s\n", outputPath)
 
-	// 更新缓存
-	if cacheManager != nil && (opts.incremental || opts.force) {
-		cacheManager.UpdateDocument(
-			docToken,
-			revisionID,
-			title,
-			mdName,
-			docType,
-		)
-	}
-
 	return nil
 }
 
-func downloadDocuments(ctx context.Context, client *core.Client, url string, cacheManager *core.CacheManager, filter *core.NodeFilter) error {
+func downloadDocuments(ctx context.Context, client *core.Client, url string) error {
 	// Validate the url to download
 	folderToken, err := utils.ValidateFolderURL(url)
 	if err != nil {
@@ -179,32 +141,21 @@ func downloadDocuments(ctx context.Context, client *core.Client, url string, cac
 			return err
 		}
 		opts := DownloadOpts{
-			outputDir:   folderPath,
-			dump:        dlOpts.dump,
-			batch:       false,
-			incremental: dlOpts.incremental,
-			force:       dlOpts.force,
+			outputDir: folderPath,
+			dump:      dlOpts.dump,
+			batch:     false,
 		}
 		for _, file := range files {
 			if file.Type == "folder" {
-				// 检查文件夹是否应该被下载
-				if filter != nil && !filter.ShouldDownloadFolder(folderPath, file.Name) {
-					fmt.Printf("⊘ 跳过文件夹: %s\n", file.Name)
-					continue
-				}
 				_folderPath := filepath.Join(folderPath, file.Name)
 				if err := processFolder(ctx, _folderPath, file.Token); err != nil {
 					return err
 				}
 			} else if file.Type == "docx" {
-				// 检查文档的父目录是否被排除
-				if filter != nil && !filter.ShouldDownloadDocument(folderPath) {
-					continue
-				}
 				// concurrently download the document
 				wg.Add(1)
 				go func(_url string) {
-					if err := downloadDocument(ctx, client, _url, &opts, cacheManager); err != nil {
+					if err := downloadDocument(ctx, client, _url, &opts); err != nil {
 						errChan <- err
 					}
 					wg.Done()
@@ -228,7 +179,7 @@ func downloadDocuments(ctx context.Context, client *core.Client, url string, cac
 	return nil
 }
 
-func downloadWiki(ctx context.Context, client *core.Client, url string, cacheManager *core.CacheManager, filter *core.NodeFilter) error {
+func downloadWiki(ctx context.Context, client *core.Client, url string) error {
 	prefixURL, spaceID, err := utils.ValidateWikiURL(url)
 	if err != nil {
 		return err
@@ -265,18 +216,6 @@ func downloadWiki(ctx context.Context, client *core.Client, url string, cacheMan
 		}
 		for _, n := range nodes {
 			if n.HasChild {
-				// 检查目录是否应该被下载
-				if filter != nil {
-					include, skippedByParent := filter.ShouldIncludeNode(folderPath, n.Title)
-					if !include {
-						if skippedByParent {
-							fmt.Printf("⊘ 跳过目录（父目录已排除）: %s\n", n.Title)
-						} else {
-							fmt.Printf("⊘ 跳过目录: %s\n", n.Title)
-						}
-						continue
-					}
-				}
 				_folderPath := filepath.Join(folderPath, n.Title)
 				if err := downloadWikiNode(ctx, client,
 					spaceID, _folderPath, &n.NodeToken); err != nil {
@@ -284,21 +223,15 @@ func downloadWiki(ctx context.Context, client *core.Client, url string, cacheMan
 				}
 			}
 			if n.ObjType == "docx" {
-				// 检查文档的父目录是否被排除
-				if filter != nil && !filter.ShouldDownloadDocument(folderPath) {
-					continue
-				}
 				opts := DownloadOpts{
-					outputDir:   folderPath,
-					dump:        dlOpts.dump,
-					batch:       false,
-					incremental: dlOpts.incremental,
-					force:       dlOpts.force,
+					outputDir: folderPath,
+					dump:      dlOpts.dump,
+					batch:     false,
 				}
 				wg.Add(1)
 				semaphore <- struct{}{}
 				go func(_url string) {
-					if err := downloadDocument(ctx, client, _url, &opts, cacheManager); err != nil {
+					if err := downloadDocument(ctx, client, _url, &opts); err != nil {
 						errChan <- err
 					}
 					wg.Done()
@@ -340,58 +273,12 @@ func handleDownloadCommand(url string) error {
 	client := core.NewClient(dlConfig.Feishu)
 	ctx := context.Background()
 
-	// 初始化缓存管理器
-	var cacheManager *core.CacheManager
-	if dlOpts.incremental || dlOpts.force {
-		cacheManager, err = core.NewCacheManager(dlOpts.outputDir)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "警告: 无法初始化缓存管理器: %v\n", err)
-			cacheManager = nil
-		}
-
-		if dlOpts.force && cacheManager != nil {
-			fmt.Println("强制模式: 将重新下载所有文档并更新缓存")
-		} else if dlOpts.incremental && cacheManager != nil {
-			fmt.Println("增量模式: 将跳过未修改的文档")
-		}
-	}
-
-	// 初始化目录过滤器
-	var nodeFilter *core.NodeFilter
-	if dlOpts.include != "" || dlOpts.exclude != "" {
-		filterConfig := core.FilterConfig{
-			IncludePatterns: core.ParsePatterns(dlOpts.include),
-			ExcludePatterns: core.ParsePatterns(dlOpts.exclude),
-		}
-		nodeFilter = core.NewNodeFilter(filterConfig)
-
-		fmt.Println("目录过滤已启用:")
-		if len(filterConfig.IncludePatterns) > 0 {
-			fmt.Printf("  包含: %v\n", filterConfig.IncludePatterns)
-		}
-		if len(filterConfig.ExcludePatterns) > 0 {
-			fmt.Printf("  排除: %v\n", filterConfig.ExcludePatterns)
-		}
-	}
-
 	// 执行下载
-	var downloadErr error
 	if dlOpts.batch {
-		downloadErr = downloadDocuments(ctx, client, url, cacheManager, nodeFilter)
+		return downloadDocuments(ctx, client, url)
 	} else if dlOpts.wiki {
-		downloadErr = downloadWiki(ctx, client, url, cacheManager, nodeFilter)
+		return downloadWiki(ctx, client, url)
 	} else {
-		downloadErr = downloadDocument(ctx, client, url, &dlOpts, cacheManager)
+		return downloadDocument(ctx, client, url, &dlOpts)
 	}
-
-	// 保存缓存
-	if cacheManager != nil {
-		if err := cacheManager.Save(); err != nil {
-			fmt.Fprintf(os.Stderr, "警告: 缓存保存失败: %v\n", err)
-		} else if dlOpts.incremental || dlOpts.force {
-			fmt.Println("✓ 缓存已更新")
-		}
-	}
-
-	return downloadErr
 }

@@ -298,3 +298,96 @@ func TestNodeFilter_Reset(t *testing.T) {
 		t.Error("Expected child to be skipped by parent after reset")
 	}
 }
+
+func TestNodeFilter_ShouldDownloadDocument_WithIncludePatterns(t *testing.T) {
+	filter := NewNodeFilter(FilterConfig{
+		IncludePatterns: []string{"*管理与规范*"},
+	})
+
+	// 模拟 Wiki 结构:
+	// wiki/                       <- 根目录
+	// ├── 首页                    <- 不匹配，被排除
+	// ├── 测试管理                <- 不匹配，被排除
+	// ├── 测试管理与规范          <- 匹配，被包含
+	// └── doc.md                  <- 在根目录下的文档
+
+	// 处理目录
+	include, _ := filter.ShouldIncludeNode("wiki", "首页")
+	if include {
+		t.Error("Expected '首页' to be excluded")
+	}
+
+	include, _ = filter.ShouldIncludeNode("wiki", "测试管理")
+	if include {
+		t.Error("Expected '测试管理' to be excluded")
+	}
+
+	include, _ = filter.ShouldIncludeNode("wiki", "测试管理与规范")
+	if !include {
+		t.Error("Expected '测试管理与规范' to be included")
+	}
+
+	// 测试文档下载
+	// 根目录下的文档不应该下载（因为配置了 Include 白名单，但根目录不在 includedPaths 中）
+	if filter.ShouldDownloadDocument("wiki") {
+		t.Error("Expected document in root 'wiki' to NOT be downloaded when include patterns are set")
+	}
+
+	// 被排除目录下的文档不应该下载
+	excludedPath := filepath.Join("wiki", "首页")
+	if filter.ShouldDownloadDocument(excludedPath) {
+		t.Error("Expected document in excluded path to NOT be downloaded")
+	}
+
+	// 被包含目录下的文档应该下载
+	includedPath := filepath.Join("wiki", "测试管理与规范")
+	if !filter.ShouldDownloadDocument(includedPath) {
+		t.Error("Expected document in included path '测试管理与规范' to be downloaded")
+	}
+
+	// 被包含目录的子目录下的文档也应该下载
+	nestedPath := filepath.Join("wiki", "测试管理与规范", "子目录")
+	if !filter.ShouldDownloadDocument(nestedPath) {
+		t.Error("Expected document in nested path under included directory to be downloaded")
+	}
+}
+
+func TestNodeFilter_ShouldDownloadDocument_NoFilters(t *testing.T) {
+	filter := NewNodeFilter(FilterConfig{})
+
+	// 无过滤条件时，所有文档都应该下载
+	if !filter.ShouldDownloadDocument("wiki") {
+		t.Error("Expected document to be downloadable when no filters")
+	}
+
+	if !filter.ShouldDownloadDocument(filepath.Join("wiki", "any", "path")) {
+		t.Error("Expected document to be downloadable when no filters")
+	}
+}
+
+func TestNodeFilter_ShouldDownloadDocument_ExcludeOnly(t *testing.T) {
+	filter := NewNodeFilter(FilterConfig{
+		ExcludePatterns: []string{"草稿"},
+	})
+
+	// 排除"草稿"目录
+	filter.ShouldIncludeNode("wiki", "草稿")
+	filter.ShouldIncludeNode("wiki", "正式")
+
+	// 只配置 Exclude 时，正常路径下的文档应该可以下载
+	normalPath := filepath.Join("wiki", "正式")
+	if !filter.ShouldDownloadDocument(normalPath) {
+		t.Error("Expected document in non-excluded path to be downloadable")
+	}
+
+	// 被排除路径下的文档不应该下载
+	excludedPath := filepath.Join("wiki", "草稿")
+	if filter.ShouldDownloadDocument(excludedPath) {
+		t.Error("Expected document in excluded path to NOT be downloaded")
+	}
+
+	// 根目录下的文档应该可以下载（因为没有配置 Include 白名单）
+	if !filter.ShouldDownloadDocument("wiki") {
+		t.Error("Expected document in root to be downloadable when only exclude patterns are set")
+	}
+}

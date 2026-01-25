@@ -84,45 +84,80 @@ func main() {
 						Usage:       "Download all documents within the wiki.",
 						Destination: &dlOpts.wiki,
 					},
-					&cli.BoolFlag{
-						Name:        "incremental",
-						Aliases:     []string{"i"},
-						Value:       false,
-						Usage:       "Enable incremental download (skip unchanged documents)",
-						Destination: &dlOpts.incremental,
-					},
-					&cli.BoolFlag{
-						Name:        "force",
-						Aliases:     []string{"f"},
-						Value:       false,
-						Usage:       "Force re-download all documents (ignore cache)",
-						Destination: &dlOpts.force,
-					},
-					&cli.StringFlag{
-						Name:        "include",
-						Value:       "",
-						Usage:       "Only download directories matching patterns (comma-separated, supports wildcards like *test*)",
-						Destination: &dlOpts.include,
-					},
-					&cli.StringFlag{
-						Name:        "exclude",
-						Value:       "",
-						Usage:       "Exclude directories matching patterns (comma-separated, supports wildcards like *draft*)",
-						Destination: &dlOpts.exclude,
-					},
 				},
 				ArgsUsage: "<url>",
 				Action: func(ctx *cli.Context) error {
 					if ctx.NArg() == 0 {
 						return cli.Exit("Please specify the document/folder/wiki url", 1)
 					} else {
-						// 参数验证：force 和 incremental 互斥
-						if dlOpts.force && dlOpts.incremental {
-							return cli.Exit("Cannot use --force and --incremental together", 1)
-						}
 						url := ctx.Args().First()
 						return handleDownloadCommand(url)
 					}
+				},
+			},
+			{
+				Name:  "sync",
+				Usage: "Sync feishu/larksuite folder or wiki to local directory (with incremental download, filtering)",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:        "output",
+						Aliases:     []string{"o"},
+						Value:       "./",
+						Usage:       "Specify the output directory for the markdown files",
+						Destination: &syncOpts.outputDir,
+					},
+					&cli.BoolFlag{
+						Name:        "incremental",
+						Aliases:     []string{"i"},
+						Value:       true,
+						Usage:       "Enable incremental sync (skip unchanged documents, enabled by default)",
+						Destination: &syncOpts.incremental,
+					},
+					&cli.BoolFlag{
+						Name:        "force",
+						Aliases:     []string{"f"},
+						Value:       false,
+						Usage:       "Force re-download all documents (ignore cache)",
+						Destination: &syncOpts.force,
+					},
+					&cli.StringFlag{
+						Name:        "include",
+						Value:       "",
+						Usage:       "Only sync directories matching patterns (comma-separated, supports wildcards like *test*)",
+						Destination: &syncOpts.include,
+					},
+					&cli.StringFlag{
+						Name:        "exclude",
+						Value:       "",
+						Usage:       "Exclude directories matching patterns (comma-separated, supports wildcards like *draft*)",
+						Destination: &syncOpts.exclude,
+					},
+					&cli.IntFlag{
+						Name:        "concurrency",
+						Aliases:     []string{"c"},
+						Value:       5,
+						Usage:       "Maximum number of concurrent downloads",
+						Destination: &syncOpts.concurrency,
+					},
+					&cli.BoolFlag{
+						Name:        "dump",
+						Value:       false,
+						Usage:       "Dump json response of the OPEN API",
+						Destination: &syncOpts.dump,
+					},
+				},
+				ArgsUsage: "[url]",
+				Action: func(ctx *cli.Context) error {
+					// 参数验证：force 和 incremental 互斥
+					if syncOpts.force && syncOpts.incremental {
+						// force 模式下自动禁用 incremental
+						syncOpts.incremental = false
+					}
+					url := ""
+					if ctx.NArg() > 0 {
+						url = ctx.Args().First()
+					}
+					return handleSyncCommand(url)
 				},
 			},
 		},

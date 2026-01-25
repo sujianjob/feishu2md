@@ -110,3 +110,98 @@ func TestConfigReadWrite(t *testing.T) {
 	assert.Equal(t, "u-test-token", readConfig2.Feishu.UserAccessToken)
 	assert.Equal(t, AuthTypeUser, readConfig2.Feishu.AuthType)
 }
+
+func TestConfigMigrate(t *testing.T) {
+	tests := []struct {
+		name         string
+		config       Config
+		wantMigrated bool
+		wantVersion  string
+		wantAuthType string
+	}{
+		{
+			name: "新配置无需迁移",
+			config: Config{
+				Version: ConfigVersion,
+				Feishu: FeishuConfig{
+					AppId:     "test_id",
+					AppSecret: "test_secret",
+					AuthType:  AuthTypeApp,
+				},
+			},
+			wantMigrated: false,
+			wantVersion:  ConfigVersion,
+			wantAuthType: AuthTypeApp,
+		},
+		{
+			name: "旧配置需要迁移版本号",
+			config: Config{
+				Version: "",
+				Feishu: FeishuConfig{
+					AppId:     "test_id",
+					AppSecret: "test_secret",
+					AuthType:  AuthTypeApp,
+				},
+			},
+			wantMigrated: true,
+			wantVersion:  ConfigVersion,
+			wantAuthType: AuthTypeApp,
+		},
+		{
+			name: "旧配置需要迁移AuthType",
+			config: Config{
+				Version: ConfigVersion,
+				Feishu: FeishuConfig{
+					AppId:     "test_id",
+					AppSecret: "test_secret",
+					AuthType:  "",
+				},
+			},
+			wantMigrated: true,
+			wantVersion:  ConfigVersion,
+			wantAuthType: AuthTypeApp,
+		},
+		{
+			name: "旧配置需要迁移版本号和AuthType",
+			config: Config{
+				Version: "",
+				Feishu: FeishuConfig{
+					AppId:     "test_id",
+					AppSecret: "test_secret",
+					AuthType:  "",
+				},
+			},
+			wantMigrated: true,
+			wantVersion:  ConfigVersion,
+			wantAuthType: AuthTypeApp,
+		},
+		{
+			name: "用户鉴权配置无需迁移AuthType",
+			config: Config{
+				Version: "",
+				Feishu: FeishuConfig{
+					UserAccessToken: "u-test",
+					AuthType:        AuthTypeUser,
+				},
+			},
+			wantMigrated: true,
+			wantVersion:  ConfigVersion,
+			wantAuthType: AuthTypeUser,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			migrated := tt.config.Migrate()
+			assert.Equal(t, tt.wantMigrated, migrated)
+			assert.Equal(t, tt.wantVersion, tt.config.Version)
+			assert.Equal(t, tt.wantAuthType, tt.config.Feishu.AuthType)
+		})
+	}
+}
+
+func TestNewConfigHasVersion(t *testing.T) {
+	config := NewConfig("test_id", "test_secret")
+	assert.Equal(t, ConfigVersion, config.Version)
+	assert.Equal(t, AuthTypeApp, config.Feishu.AuthType)
+}

@@ -178,11 +178,24 @@ feishu2md config
      --dump                    Dump json response of the OPEN API (default: false)
      --batch                   Download all documents under a folder (default: false)
      --wiki                    Download all documents within the wiki. (default: false)
-     --incremental, -i         Enable incremental download (skip unchanged documents) (default: false)
-     --force, -f               Force re-download all documents (ignore cache) (default: false)
-     --include value           Only download directories matching patterns (comma-separated, supports wildcards)
-     --exclude value           Exclude directories matching patterns (comma-separated, supports wildcards)
      --help, -h                show help (default: false)
+
+   $ feishu2md sync -h
+   NAME:
+     feishu2md sync - Sync feishu/larksuite folder or wiki to local directory
+
+   USAGE:
+     feishu2md sync [command options] [url]
+
+   OPTIONS:
+     --output value, -o value     Specify the output directory (default: "./")
+     --incremental, -i            Enable incremental sync (default: true)
+     --force, -f                  Force re-download all documents (default: false)
+     --include value              Only sync directories matching patterns (comma-separated)
+     --exclude value              Exclude directories matching patterns (comma-separated)
+     --concurrency value, -c      Maximum concurrent downloads (default: 5)
+     --dump                       Dump json response of the OPEN API (default: false)
+     --help, -h                   show help (default: false)
 
    ```
 
@@ -226,16 +239,36 @@ feishu2md config
   $ feishu2md dl --wiki -o output_directory "https://domain.feishu.cn/wiki/settings/123456789101112"
   ```
 
-  **增量下载**
+</details>
 
-  支持增量下载，跳过未修改的文档，节省时间和 API 调用：
+<details>
+  <summary>sync 命令（推荐）</summary>
+
+  `sync` 命令是推荐的批量同步方式，支持增量下载、目录过滤等高级功能。
+
+  **基本用法**
 
   ```bash
-  # 增量下载（跳过未修改的文档）
-  $ feishu2md dl --wiki -i "https://domain.feishu.cn/wiki/settings/123456789101112"
+  # 同步知识库（自动检测 URL 类型）
+  $ feishu2md sync "https://domain.feishu.cn/wiki/settings/123456789101112"
+
+  # 同步云盘文件夹
+  $ feishu2md sync "https://domain.feishu.cn/drive/folder/foldertoken"
+
+  # 指定输出目录
+  $ feishu2md sync -o ./output "https://domain.feishu.cn/wiki/settings/xxx"
+  ```
+
+  **增量同步**
+
+  sync 命令默认开启增量模式，只下载有更新的文档：
+
+  ```bash
+  # 增量同步（默认行为，跳过未修改的文档）
+  $ feishu2md sync "https://domain.feishu.cn/wiki/settings/xxx"
 
   # 强制重新下载所有文档
-  $ feishu2md dl --wiki -f "https://domain.feishu.cn/wiki/settings/123456789101112"
+  $ feishu2md sync -f "https://domain.feishu.cn/wiki/settings/xxx"
   ```
 
   **目录过滤**
@@ -243,23 +276,42 @@ feishu2md config
   支持通过 `--include` 和 `--exclude` 参数过滤目录：
 
   ```bash
-  # 仅下载包含"文档"的目录
-  $ feishu2md dl --wiki --include "*文档*" "https://domain.feishu.cn/wiki/settings/xxx"
+  # 仅同步包含"文档"的目录
+  $ feishu2md sync --include "*文档*" "https://domain.feishu.cn/wiki/settings/xxx"
 
   # 排除草稿和测试目录
-  $ feishu2md dl --wiki --exclude "*草稿*,*测试*" "https://domain.feishu.cn/wiki/settings/xxx"
+  $ feishu2md sync --exclude "*草稿*,*测试*" "https://domain.feishu.cn/wiki/settings/xxx"
 
-  # 组合使用：仅下载技术相关目录，但排除草稿
-  $ feishu2md dl --wiki --include "技术*,API*" --exclude "*草稿*" "https://domain.feishu.cn/wiki/settings/xxx"
-
-  # 批量下载文件夹时也支持过滤
-  $ feishu2md dl --batch --exclude "archived,temp" "https://domain.feishu.cn/drive/folder/xxx"
+  # 组合使用：仅同步技术相关目录，但排除草稿
+  $ feishu2md sync --include "技术*,API*" --exclude "*草稿*" "https://domain.feishu.cn/wiki/settings/xxx"
   ```
 
   通配符语法：
   - `*` 匹配任意字符
   - `?` 匹配单个字符
   - `[abc]` 匹配指定字符
+
+  **并发控制**
+
+  ```bash
+  # 设置并发数为 10（默认为 5）
+  $ feishu2md sync -c 10 "https://domain.feishu.cn/wiki/settings/xxx"
+  ```
+
+  **同步配置持久化**
+
+  sync 命令会自动在输出目录保存同步配置（`.feishu2md.sync.json`），后续可以省略 URL：
+
+  ```bash
+  # 首次同步
+  $ feishu2md sync -o ./docs "https://domain.feishu.cn/wiki/settings/xxx"
+
+  # 后续同步（使用已保存的配置）
+  $ feishu2md sync -o ./docs
+
+  # 或者在输出目录下直接运行
+  $ cd ./docs && feishu2md sync
+  ```
 
 </details>
 
@@ -364,15 +416,21 @@ make docker
 
 ```
 feishu2md/
-├── cmd/           # CLI 入口和命令
-├── core/          # 核心业务逻辑
-│   ├── client.go  # 飞书 API 客户端
-│   ├── parser.go  # 文档解析器
-│   ├── filter.go  # 目录过滤器
-│   └── cache.go   # 缓存管理
-├── utils/         # 工具函数
-├── web/           # Web 服务
-└── testdata/      # 测试数据
+├── cmd/              # CLI 入口和命令
+│   ├── main.go       # 命令行入口
+│   ├── download.go   # 下载命令
+│   ├── sync.go       # 同步命令
+│   └── config.go     # 配置命令
+├── core/             # 核心业务逻辑
+│   ├── client.go     # 飞书 API 客户端
+│   ├── parser.go     # 文档解析器
+│   ├── filter.go     # 目录过滤器
+│   ├── cache.go      # 缓存管理
+│   ├── config.go     # 全局配置
+│   └── sync_config.go # 同步配置
+├── utils/            # 工具函数
+├── web/              # Web 服务
+└── testdata/         # 测试数据
 ```
 
 ### 贡献

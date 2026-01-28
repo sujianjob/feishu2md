@@ -84,15 +84,20 @@ func (f *NodeFilter) ShouldIncludeNode(parentPath, nodeName string) (include boo
 		return true, false
 	}
 
-	// 先检查 include（白名单）
+	// 如果父目录已经被包含，子目录自动被包含（不再检查 include 模式）
+	// 但仍然检查 exclude 模式
+	parentIncluded := f.isParentIncluded(parentPath)
+
+	// 检查 include（白名单）
 	if len(f.config.IncludePatterns) > 0 {
-		if !matchAnyPattern(nodeName, f.config.IncludePatterns) {
+		// 如果父目录已包含，则子目录自动包含；否则检查当前节点是否匹配
+		if !parentIncluded && !matchAnyPattern(nodeName, f.config.IncludePatterns) {
 			f.excludedPaths[currentPath] = true
 			return false, false
 		}
 	}
 
-	// 再检查 exclude（黑名单）
+	// 再检查 exclude（黑名单）- 即使父目录被包含，也要检查排除规则
 	if len(f.config.ExcludePatterns) > 0 {
 		if matchAnyPattern(nodeName, f.config.ExcludePatterns) {
 			f.excludedPaths[currentPath] = true

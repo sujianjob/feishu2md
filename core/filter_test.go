@@ -391,3 +391,63 @@ func TestNodeFilter_ShouldDownloadDocument_ExcludeOnly(t *testing.T) {
 		t.Error("Expected document in root to be downloadable when only exclude patterns are set")
 	}
 }
+
+func TestNodeFilter_ChildDirectoriesAutoIncluded(t *testing.T) {
+	filter := NewNodeFilter(FilterConfig{
+		IncludePatterns: []string{"*测试*"},
+	})
+
+	// 模拟 Wiki 结构:
+	// wiki/
+	// ├── 测试管理/              <- 匹配 *测试*，被包含
+	// │   ├── 能力建设规划/      <- 不匹配 *测试*，但父目录已包含，应该自动包含
+	// │   │   └── doc.md
+	// │   └── 子目录A/
+	// │       └── 深层目录/
+	// │           └── doc.md
+	// └── 其他目录/              <- 不匹配，被排除
+
+	// 一级目录：测试管理 匹配
+	include, _ := filter.ShouldIncludeNode("wiki", "测试管理")
+	if !include {
+		t.Error("Expected '测试管理' to be included (matches pattern)")
+	}
+
+	// 一级目录：其他目录 不匹配
+	include, _ = filter.ShouldIncludeNode("wiki", "其他目录")
+	if include {
+		t.Error("Expected '其他目录' to be excluded (doesn't match pattern)")
+	}
+
+	// 二级目录：能力建设规划 不匹配模式，但父目录已包含
+	parentPath := filepath.Join("wiki", "测试管理")
+	include, _ = filter.ShouldIncludeNode(parentPath, "能力建设规划")
+	if !include {
+		t.Error("Expected '能力建设规划' to be auto-included (parent is included)")
+	}
+
+	// 三级目录：深层目录 也应该自动包含
+	deepParentPath := filepath.Join("wiki", "测试管理", "能力建设规划")
+	include, _ = filter.ShouldIncludeNode(deepParentPath, "深层目录")
+	if !include {
+		t.Error("Expected '深层目录' to be auto-included (ancestor is included)")
+	}
+
+	// 验证文档下载
+	// 被包含目录的子目录下的文档应该可以下载
+	docPath := filepath.Join("wiki", "测试管理", "能力建设规划")
+	if !filter.ShouldDownloadDocument(docPath) {
+		t.Error("Expected document in auto-included directory to be downloadable")
+	}
+
+	deepDocPath := filepath.Join("wiki", "测试管理", "能力建设规划", "深层目录")
+	if !filter.ShouldDownloadDocument(deepDocPath) {
+		t.Error("Expected document in deeply nested auto-included directory to be downloadable")
+	}
+
+	// 被排除目录下的文档不应该下载
+	excludedDocPath := filepath.Join("wiki", "其他目录")
+	if filter.ShouldDownloadDocument(excludedDocPath) {
+		t.Error("Expected document in excluded directory to NOT be downloadable")
+	}
+}
